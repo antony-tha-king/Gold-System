@@ -709,6 +709,10 @@
                 <input type="number" id="customTP" placeholder="Enter pips for TP" value="500">
             </div>
         </div>
+        <div>
+       <label for="customSL">Custom Stop Loss (in pips)</label>
+       <input type="number" id="customSL" placeholder="Enter pips for SL">
+   </div>
         <button class="calculate-btn" onclick="calculateTradePoints()">Calculate Trade Parameters</button>
 
         <div class="trade-results-grid">
@@ -726,6 +730,7 @@
                 <h4>Custom Take Profit (TP)</h4>
                 <div class="result-value" id="tpCustomPrice">-</div>
                 <button class="copy-button" onclick="copyToClipboard('tpCustomPrice')">Copy</button>
+                
             </div>
             <div class="result-item">
                 <h4>Stop Loss (SL)</h4>
@@ -794,345 +799,354 @@
     </div>
 
 <script>
-    let currentBalance = parseFloat(localStorage.getItem('currentBalance')) || 50;
-    let tradesToday = parseInt(localStorage.getItem('tradesToday')) || 0;
-    let lastTradeDate = localStorage.getItem('lastTradeDate') || '';
-    let lastWithdrawalDate = localStorage.getItem('lastWithdrawalDate') || '';
-    const timeZones = Intl.supportedValuesOf('timeZone');
-    const MIN_LOT_SIZE = 0.01; // Minimum lot size set to 0.01
+let currentBalance = parseFloat(localStorage.getItem('currentBalance')) || 50;
+let tradesToday = parseInt(localStorage.getItem('tradesToday')) || 0;
+let lastTradeDate = localStorage.getItem('lastTradeDate') || '';
+let lastWithdrawalDate = localStorage.getItem('lastWithdrawalDate') || '';
+const timeZones = Intl.supportedValuesOf('timeZone');
+const MIN_LOT_SIZE = 0.01; // Minimum lot size set to 0.01
 
-    function login() {
-        if (document.getElementById('username').value === 'admin' &&
-            document.getElementById('password').value === 'profits') {
-            document.getElementById('loginSection').style.display = 'none';
-            document.getElementById('dashboard').style.display = 'block';
-            checkDateReset();
-            updateDisplay();
-            startClock();
-        } else {
-            alert('Invalid credentials');
-        }
+function login() {
+    if (document.getElementById('username').value === 'admin' &&
+        document.getElementById('password').value === 'profits') {
+        document.getElementById('loginSection').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        checkDateReset();
+        updateDisplay();
+        startClock();
+    } else {
+        alert('Invalid credentials');
     }
+}
 
-    function checkDateReset() {
+function checkDateReset() {
+    const today = new Date().toDateString();
+    if (today !== lastTradeDate) {
+        tradesToday = 0;
+        lastTradeDate = today;
+        localStorage.setItem('tradesToday', tradesToday);
+        localStorage.setItem('lastTradeDate', lastTradeDate);
+    }
+}
+
+function copyToClipboard(elementId) {
+    const textToCopy = document.getElementById(elementId).textContent;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        alert('Copied to clipboard: ' + textToCopy);
+    }).catch(err => {
+        console.error('Error copying text: ', err);
+    });
+}
+
+function calculateTradeGroups() {
+    const DAILY_TARGET_PERCENT = 0.02;
+    const PER_TRADE_PIPS = 500;
+    const MAX_LOT_SIZE = 5;
+
+    const dailyTarget = currentBalance * DAILY_TARGET_PERCENT;
+    const perTradeAmount = currentBalance * 0.01;
+    const baseLots = Math.max(perTradeAmount / PER_TRADE_PIPS, MIN_LOT_SIZE);
+
+    const createTradeGroup = () => {
+        const trades = [];
+        let remaining = baseLots;
+        while (remaining > 0) {
+            const lots = Math.min(MAX_LOT_SIZE, Math.max(remaining, MIN_LOT_SIZE));
+            trades.push({
+                lots: lots.toFixed(3),
+                profit: (lots * PER_TRADE_PIPS).toFixed(2),
+                percent: ((lots * PER_TRADE_PIPS / currentBalance) * 100).toFixed(2)
+            });
+            remaining -= lots;
+        }
+        return trades;
+    };
+
+    return {
+        groups: [createTradeGroup(), createTradeGroup()],
+        dailyTarget: dailyTarget
+    };
+}
+
+function updateDisplay() {
+    const target = 1000000;
+    const tradePlan = calculateTradeGroups();
+    const totalTrades = tradePlan.groups.flat().length;
+    const remainingTrades = Math.max(totalTrades - tradesToday, 0);
+
+    // Update top metrics
+    document.getElementById('currentBalance').textContent = `$${currentBalance.toFixed(2)}`;
+    document.getElementById('daysRemaining').textContent = Math.ceil(
+        Math.log(target / currentBalance) / Math.log(1.02)
+    );
+    document.getElementById('dailyTarget').textContent = `$${(currentBalance * 0.02).toFixed(2)}`;
+    document.getElementById('stopLossAmount').textContent = `$${(currentBalance * 0.05).toFixed(2)}`;
+    
+    // Calculate and update recommended lot size (minimum 0.01)
+    const recommendedLotSize = Math.max(currentBalance * 0.01 / 500, MIN_LOT_SIZE);
+    document.getElementById('lotSize').textContent = recommendedLotSize.toFixed(3);
+
+    // Update progress bar
+    document.getElementById('progressFill').style.width =
+        `${Math.min((currentBalance / target) * 100, 100)}%`;
+
+    // Build trade plan display
+    let outputHtml = `
+    <div class="trade-summary">
+    <strong>Daily Target:</strong> $${tradePlan.dailyTarget.toFixed(2)}<br>
+    <strong>Total Trades Required:</strong> ${totalTrades}<br>
+    <strong>Completed Trades:</strong> ${tradesToday}<br>
+    <strong>Remaining Trades:</strong> ${remainingTrades}
+    </div>`;
+
+    tradePlan.groups.forEach((group, groupIndex) => {
+        const groupLots = group.reduce((sum, trade) => sum + parseFloat(trade.lots), 0).toFixed(3);
+        outputHtml += `
+        <div class="trade-group">
+        <h4>1% Target Group ${groupIndex + 1} (${group.length} trades, ${groupLots} lots total)</h4>`;
+
+        group.forEach((trade, tradeIndex) => {
+            const status = tradesToday > (groupIndex * group.length + tradeIndex)
+                ? "✅ Completed"
+                : "🟡 Pending";
+
+            outputHtml += `
+            <div class="trade-detail">
+            <div class="trade-stats">
+            <span>Trade ${tradeIndex + 1}</span>
+            <span>Lots: ${trade.lots}</span>
+            <span>Profit: $${trade.profit}</span>
+            <span>Status: ${status}</span>
+            </div>
+            </div>`;
+        });
+
+        outputHtml += `</div>`;
+    });
+
+    document.getElementById('splitTradesOutput').innerHTML = outputHtml;
+
+    // Check if today is the end of the month
+    checkEndOfMonthReminder();
+}
+
+function checkEndOfMonthReminder() {
+    const today = new Date();
+    const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+    if (today.getDate() === lastDayOfMonth) {
+        alert("Reminder: It's the end of the month! Don't forget to withdraw your profits.");
+    }
+}
+
+function updateBalance() {
+    const newBalance = parseFloat(document.getElementById('dailyInput').value);
+    if (!isNaN(newBalance) && newBalance > 0) {
         const today = new Date().toDateString();
         if (today !== lastTradeDate) {
             tradesToday = 0;
             lastTradeDate = today;
-            localStorage.setItem('tradesToday', tradesToday);
-            localStorage.setItem('lastTradeDate', lastTradeDate);
         }
+        tradesToday++;
+        currentBalance = newBalance;
+
+        localStorage.setItem('currentBalance', currentBalance);
+        localStorage.setItem('tradesToday', tradesToday);
+        localStorage.setItem('lastTradeDate', lastTradeDate);
+
+        updateDisplay();
     }
+}
 
-    function copyToClipboard(elementId) {
-        const textToCopy = document.getElementById(elementId).textContent;
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            alert('Copied to clipboard: ' + textToCopy);
-        }).catch(err => {
-            console.error('Error copying text: ', err);
-        });
-    }
+function calculateTradePoints() {
+    const entryPrice = parseFloat(document.getElementById('entryPrice').value);
+    const direction = document.getElementById('tradeDirection').value;
+    const customTP = parseInt(document.getElementById('customTP').value) || 500;
+    const customSL = parseInt(document.getElementById('customSL').value);
+    const perTradeAmount = currentBalance * 0.01;
+    
+    // Calculate lot size with minimum of 0.01
+    const lots = Math.max(perTradeAmount / 500, MIN_LOT_SIZE);
 
-    function calculateTradeGroups() {
-        const DAILY_TARGET_PERCENT = 0.02;
-        const PER_TRADE_PIPS = 500;
-        const MAX_LOT_SIZE = 5;
-
-        const dailyTarget = currentBalance * DAILY_TARGET_PERCENT;
-        const perTradeAmount = currentBalance * 0.01;
-        const baseLots = Math.max(perTradeAmount / PER_TRADE_PIPS, MIN_LOT_SIZE); // Ensure minimum lot size
-
-        const createTradeGroup = () => {
-            const trades = [];
-            let remaining = baseLots;
-            while (remaining > 0) {
-                const lots = Math.min(MAX_LOT_SIZE, Math.max(remaining, MIN_LOT_SIZE)); // Ensure minimum lot size
-                trades.push({
-                    lots: lots.toFixed(3),
-                    profit: (lots * PER_TRADE_PIPS).toFixed(2),
-                    percent: ((lots * PER_TRADE_PIPS / currentBalance) * 100).toFixed(2)
-                });
-                remaining -= lots;
-            }
-            return trades;
-        };
-
-        return {
-            groups: [createTradeGroup(), createTradeGroup()],
-            dailyTarget: dailyTarget
-        };
-    }
-
-    function updateDisplay() {
-        const target = 1000000;
-        const tradePlan = calculateTradeGroups();
-        const totalTrades = tradePlan.groups.flat().length;
-        const remainingTrades = Math.max(totalTrades - tradesToday, 0);
-
-        // Update top metrics
-        document.getElementById('currentBalance').textContent = `$${currentBalance.toFixed(2)}`;
-        document.getElementById('daysRemaining').textContent = Math.ceil(
-            Math.log(target / currentBalance) / Math.log(1.02)
-        );
-        document.getElementById('dailyTarget').textContent = `$${(currentBalance * 0.02).toFixed(2)}`;
-        document.getElementById('stopLossAmount').textContent = `$${(currentBalance * 0.05).toFixed(2)}`;
-        
-        // Calculate and update recommended lot size (minimum 0.01)
-        const recommendedLotSize = Math.max(currentBalance * 0.01 / 500, MIN_LOT_SIZE);
-        document.getElementById('lotSize').textContent = recommendedLotSize.toFixed(3);
-
-        // Update progress bar
-        document.getElementById('progressFill').style.width =
-            `${Math.min((currentBalance / target) * 100, 100)}%`;
-
-        // Build trade plan display
-        let outputHtml = `
-        <div class="trade-summary">
-        <strong>Daily Target:</strong> $${tradePlan.dailyTarget.toFixed(2)}<br>
-        <strong>Total Trades Required:</strong> ${totalTrades}<br>
-        <strong>Completed Trades:</strong> ${tradesToday}<br>
-        <strong>Remaining Trades:</strong> ${remainingTrades}
-        </div>`;
-
-        tradePlan.groups.forEach((group, groupIndex) => {
-            const groupLots = group.reduce((sum, trade) => sum + parseFloat(trade.lots), 0).toFixed(3);
-            outputHtml += `
-            <div class="trade-group">
-            <h4>1% Target Group ${groupIndex + 1} (${group.length} trades, ${groupLots} lots total)</h4>`;
-
-            group.forEach((trade, tradeIndex) => {
-                const status = tradesToday > (groupIndex * group.length + tradeIndex)
-                    ? "✅ Completed"
-                    : "🟡 Pending";
-
-                outputHtml += `
-                <div class="trade-detail">
-                <div class="trade-stats">
-                <span>Trade ${tradeIndex + 1}</span>
-                <span>Lots: ${trade.lots}</span>
-                <span>Profit: $${trade.profit}</span>
-                <span>Status: ${status}</span>
-                </div>
-                </div>`;
-            });
-
-            outputHtml += `</div>`;
-        });
-
-        document.getElementById('splitTradesOutput').innerHTML = outputHtml;
-
-        // Check if today is the end of the month
-        checkEndOfMonthReminder();
-    }
-
-    function checkEndOfMonthReminder() {
-        const today = new Date();
-        const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-
-        if (today.getDate() === lastDayOfMonth) {
-            alert("Reminder: It's the end of the month! Don't forget to withdraw your profits.");
-        }
-    }
-
-    function updateBalance() {
-        const newBalance = parseFloat(document.getElementById('dailyInput').value);
-        if (!isNaN(newBalance) && newBalance > 0) {
-            const today = new Date().toDateString();
-            if (today !== lastTradeDate) {
-                tradesToday = 0;
-                lastTradeDate = today;
-            }
-            tradesToday++;
-            currentBalance = newBalance;
-
-            localStorage.setItem('currentBalance', currentBalance);
-            localStorage.setItem('tradesToday', tradesToday);
-            localStorage.setItem('lastTradeDate', lastTradeDate);
-
-            updateDisplay();
-        }
-    }
-
-    function calculateTradePoints() {
-        const entryPrice = parseFloat(document.getElementById('entryPrice').value);
-        const direction = document.getElementById('tradeDirection').value;
-        const customTP = parseInt(document.getElementById('customTP').value) || 500;
-        const perTradeAmount = currentBalance * 0.01;
-        
-        // Calculate lot size with minimum of 0.01
-        const lots = Math.max(perTradeAmount / 500, MIN_LOT_SIZE);
-
-        // Gold specific calculations (adjust pip value as needed)
-        const goldPipValue = 0.10; // Adjust this based on your broker's gold pip value
-        const tpCustom = direction === 'rise' ? entryPrice + (customTP * goldPipValue) : entryPrice - (customTP * goldPipValue);
-        const tp500 = direction === 'rise' ? entryPrice + (500 * goldPipValue) : entryPrice - (500 * goldPipValue);
-        const tp3000 = direction === 'rise' ? entryPrice + (3000 * goldPipValue) : entryPrice - (3000 * goldPipValue);
-        const sl = direction === 'rise'
+    // Gold specific calculations (adjust pip value as needed)
+    const goldPipValue = 0.10; // Adjust this based on your broker's gold pip value
+    const tpCustom = direction === 'rise' ? entryPrice + (customTP * goldPipValue) : entryPrice - (customTP * goldPipValue);
+    const tp500 = direction === 'rise' ? entryPrice + (500 * goldPipValue) : entryPrice - (500 * goldPipValue);
+    const tp3000 = direction === 'rise' ? entryPrice + (3000 * goldPipValue) : entryPrice - (3000 * goldPipValue);
+    
+    // Calculate stop loss - use custom if provided, otherwise calculate based on 5% of balance
+    let sl;
+    if (customSL) {
+        sl = direction === 'rise' 
+            ? entryPrice - (customSL * goldPipValue)
+            : entryPrice + (customSL * goldPipValue);
+    } else {
+        sl = direction === 'rise'
             ? entryPrice - (currentBalance * 0.05 / lots)
             : entryPrice + (currentBalance * 0.05 / lots);
-
-        document.getElementById('tpPrice').textContent = tp500.toFixed(2);
-        document.getElementById('tpPrice3000').textContent = tp3000.toFixed(2);
-        document.getElementById('slPrice').textContent = sl.toFixed(2);
-        document.getElementById('calculatedLots').textContent = lots.toFixed(3);
-        document.getElementById('tpCustomPrice').textContent = tpCustom.toFixed(2);
     }
 
-    // Rest of the functions remain the same...
-    function logout() {
-        document.getElementById('loginSection').style.display = 'block';
-        document.getElementById('dashboard').style.display = 'none';
-        document.getElementById('username').value = '';
-        document.getElementById('password').value = '';
+    document.getElementById('tpPrice').textContent = tp500.toFixed(2);
+    document.getElementById('tpPrice3000').textContent = tp3000.toFixed(2);
+    document.getElementById('slPrice').textContent = sl.toFixed(2);
+    document.getElementById('calculatedLots').textContent = lots.toFixed(3);
+    document.getElementById('tpCustomPrice').textContent = tpCustom.toFixed(2);
+}
+
+function logout() {
+    document.getElementById('loginSection').style.display = 'block';
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('username').value = '';
+    document.getElementById('password').value = '';
+}
+
+function initTimeZones() {
+    const selector = document.getElementById('timeZoneSelector');
+    timeZones.forEach(zone => {
+        const option = document.createElement('option');
+        option.value = zone;
+        option.textContent = zone;
+        selector.appendChild(option);
+    });
+}
+
+function updateTime() {
+    const timeZone = document.getElementById('timeZoneSelector').value;
+    const options = {
+        timeZone: timeZone,
+        hour12: true,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric'
+    };
+    const date = new Date().toLocaleString('en-US', options);
+    document.getElementById('currentDateTime').innerHTML = `Current Date and Time:<br>${date}`;
+}
+
+function filterTimeZones() {
+    const searchInput = document.getElementById('timezoneSearch').value.toLowerCase();
+    const selector = document.getElementById('timeZoneSelector');
+    selector.innerHTML = '';
+
+    const filteredZones = timeZones.filter(zone =>
+        zone.toLowerCase().includes(searchInput)
+    );
+
+    filteredZones.forEach(zone => {
+        const option = document.createElement('option');
+        option.value = zone;
+        option.textContent = zone;
+        selector.appendChild(option);
+    });
+
+    if (filteredZones.length > 0) {
+        selector.value = filteredZones[0];
+        updateTime();
+    }
+}
+
+function calculateCompounding() {
+    const initialBalance = parseFloat(document.getElementById('initialBalance').value);
+    const frequency = document.getElementById('compoundFrequency').value;
+    const periods = parseFloat(document.getElementById('period').value);
+
+    if (isNaN(initialBalance) || isNaN(periods) || initialBalance <= 0 || periods <= 0) {
+        alert('Please enter valid values for initial balance and period.');
+        return;
     }
 
-    function initTimeZones() {
-        const selector = document.getElementById('timeZoneSelector');
-        timeZones.forEach(zone => {
-            const option = document.createElement('option');
-            option.value = zone;
-            option.textContent = zone;
-            selector.appendChild(option);
-        });
+    let days;
+    switch (frequency) {
+        case 'daily':
+            days = periods;
+            break;
+        case 'monthly':
+            days = periods * 30;
+            break;
+        case 'yearly':
+            days = periods * 365;
+            break;
+        default:
+            days = 0;
     }
 
-    function updateTime() {
-        const timeZone = document.getElementById('timeZoneSelector').value;
-        const options = {
-            timeZone: timeZone,
-            hour12: true,
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: 'numeric',
-            second: 'numeric'
-        };
-        const date = new Date().toLocaleString('en-US', options);
-        document.getElementById('currentDateTime').innerHTML = `Current Date and Time:<br>${date}`;
+    const projectedBalance = initialBalance * Math.pow(1.02, days);
+    const totalGrowth = projectedBalance - initialBalance;
+
+    document.getElementById('projectedBalance').textContent = `$${projectedBalance.toFixed(2)}`;
+    document.getElementById('totalGrowth').textContent = `$${totalGrowth.toFixed(2)}`;
+}
+
+function calculateWithdrawal() {
+    const manualBalance = parseFloat(document.getElementById('manualBalance').value);
+    if (isNaN(manualBalance) || manualBalance <= 0) {
+        alert('Please enter a valid balance.');
+        return;
     }
 
-    function filterTimeZones() {
-        const searchInput = document.getElementById('timezoneSearch').value.toLowerCase();
-        const selector = document.getElementById('timeZoneSelector');
-        selector.innerHTML = '';
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
 
-        const filteredZones = timeZones.filter(zone =>
-            zone.toLowerCase().includes(searchInput)
-        );
-
-        filteredZones.forEach(zone => {
-            const option = document.createElement('option');
-            option.value = zone;
-            option.textContent = zone;
-            selector.appendChild(option);
-        });
-
-        if (filteredZones.length > 0) {
-            selector.value = filteredZones[0];
-            updateTime();
-        }
-    }
-
-    function calculateCompounding() {
-        const initialBalance = parseFloat(document.getElementById('initialBalance').value);
-        const frequency = document.getElementById('compoundFrequency').value;
-        const periods = parseFloat(document.getElementById('period').value);
-
-        if (isNaN(initialBalance) || isNaN(periods) || initialBalance <= 0 || periods <= 0) {
-            alert('Please enter valid values for initial balance and period.');
-            return;
-        }
-
-        let days;
-        switch (frequency) {
-            case 'daily':
-                days = periods;
-                break;
-            case 'monthly':
-                days = periods * 30;
-                break;
-            case 'yearly':
-                days = periods * 365;
-                break;
-            default:
-                days = 0;
-        }
-
-        const projectedBalance = initialBalance * Math.pow(1.02, days);
-        const totalGrowth = projectedBalance - initialBalance;
-
-        document.getElementById('projectedBalance').textContent = `$${projectedBalance.toFixed(2)}`;
-        document.getElementById('totalGrowth').textContent = `$${totalGrowth.toFixed(2)}`;
-    }
-
-    function calculateWithdrawal() {
-        const manualBalance = parseFloat(document.getElementById('manualBalance').value);
-        if (isNaN(manualBalance) || manualBalance <= 0) {
-            alert('Please enter a valid balance.');
-            return;
-        }
-
-        const today = new Date();
-        const currentMonth = today.getMonth();
-        const currentYear = today.getFullYear();
-
-        // Check monthly withdrawal eligibility
-        if (lastWithdrawalDate) {
-            const lastDate = new Date(lastWithdrawalDate);
-            if (lastDate.getMonth() !== currentMonth || lastDate.getFullYear() !== currentYear) {
-                alert('You can withdraw your profits for this month!');
-                localStorage.setItem('lastWithdrawalDate', today.toISOString());
-            }
-        } else {
+    // Check monthly withdrawal eligibility
+    if (lastWithdrawalDate) {
+        const lastDate = new Date(lastWithdrawalDate);
+        if (lastDate.getMonth() !== currentMonth || lastDate.getFullYear() !== currentYear) {
+            alert('You can withdraw your profits for this month!');
             localStorage.setItem('lastWithdrawalDate', today.toISOString());
         }
+    } else {
+        localStorage.setItem('lastWithdrawalDate', today.toISOString());
+    }
 
-        // Calculate 30-day growth
-        let simulatedBalance = manualBalance;
-        for (let i = 0; i < 30; i++) {
-            simulatedBalance = simulatedBalance / 1.02; // Reverse daily 2% growth
-        }
-        
-        const totalGrowth = manualBalance - simulatedBalance;
-        const withdrawableAmount = totalGrowth * 0.05;
+    // Calculate 30-day growth
+    let simulatedBalance = manualBalance;
+    for (let i = 0; i < 30; i++) {
+        simulatedBalance = simulatedBalance / 1.02; // Reverse daily 2% growth
+    }
+    
+    const totalGrowth = manualBalance - simulatedBalance;
+    const withdrawableAmount = totalGrowth * 0.05;
 
-        // Display results
-        document.getElementById('withdrawalOutput').innerHTML = `
-            <div class="withdrawal-results-grid">
-                <div class="withdrawal-result-item">
-                    <h4>Total Growth Over 30 Days</h4>
-                    <div class="withdrawal-result-value">$${totalGrowth.toFixed(2)}</div>
-                </div>
-                <div class="withdrawal-result-item">
-                    <h4>Withdrawable Amount</h4>
-                    <div class="withdrawal-result-value" id="withdrawableAmount">$${withdrawableAmount.toFixed(2)}</div>
-                    <button class="copy-button" onclick="copyToClipboard('withdrawableAmount')">Copy</button>
-                </div>
+    // Display results
+    document.getElementById('withdrawalOutput').innerHTML = `
+        <div class="withdrawal-results-grid">
+            <div class="withdrawal-result-item">
+                <h4>Total Growth Over 30 Days</h4>
+                <div class="withdrawal-result-value">$${totalGrowth.toFixed(2)}</div>
             </div>
-        `;
-    }
+            <div class="withdrawal-result-item">
+                <h4>Withdrawable Amount</h4>
+                <div class="withdrawal-result-value" id="withdrawableAmount">$${withdrawableAmount.toFixed(2)}</div>
+                <button class="copy-button" onclick="copyToClipboard('withdrawableAmount')">Copy</button>
+            </div>
+        </div>
+    `;
+}
 
-    function startClock() {
-        setInterval(updateTime, 1000);
-    }
+function startClock() {
+    setInterval(updateTime, 1000);
+}
 
-    function toggleDarkMode() {
-        document.body.classList.toggle('dark-mode');
-    }
+function toggleDarkMode() {
+    document.body.classList.toggle('dark-mode');
+}
 
-    function redirectToWhatsApp() {
-        window.open('https://wa.me/254111918657?text=Hello Antony I saw you trading Application 😎', '_blank');
-    }
+function redirectToWhatsApp() {
+    window.open('https://wa.me/254111918657?text=Hello Antony I saw you trading Application 😎', '_blank');
+}
 
-    // Initialize time zones when page loads
-    window.onload = function() {
-        initTimeZones();
-        updateTime();
-        checkDateReset();
-        updateDisplay();
-    };
-</script>
+// Initialize time zones when page loads
+window.onload = function() {
+    initTimeZones();
+    updateTime();
+    checkDateReset();
+    updateDisplay();
+};
+    </script>
 </body>
 </html>
